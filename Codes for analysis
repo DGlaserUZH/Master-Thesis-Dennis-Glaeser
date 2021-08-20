@@ -1,0 +1,499 @@
+options(scipen=999)
+library(naniar)
+library(psych)
+library(plm)
+library(tidyverse)
+library(caret)
+library(ggpubr)
+library(car)
+library(polycor)
+library(MASS)
+library(lmtest)
+library(tseries)
+
+#data preparations for the later analysis
+SurveyRcleaned$time <- as.character.Date(SurveyRcleaned$time)
+SurveyRcleaned$Industry <- factor(SurveyRcleaned$Industry)
+SurveyRcleaned$Founding <- factor(SurveyRcleaned$Founding)
+SurveyRcleaned$id <- factor(SurveyRcleaned$id)
+
+#Create tables for descriptive analysis
+
+#AMO
+AMOSub <- SurveyRcleaned[, c("AScore", "MScore", "OScore")]
+describe(AMOSub)
+describeBy(AMOSub, SurveyRcleaned$`Year observation`)
+
+#employee turnover
+turnover <- SurveyRcleaned [, c("WRR", "TurnOutTotal")]
+describe(turnover)
+describeBy(turnover, SurveyRcleaned$time)
+
+#startup performance
+performance <- SurveyRcleaned [, c("Rev", "RevGrowth")]
+describe(performance)
+describeBy(performance, SurveyRcleaned$time)
+
+#control
+control <- SurveyRcleaned [, c("age", "Turn","HighQual","RDA","Funding","HRPosition","PrevDirectorExp", "AMOExp", "Industry", "Founding")]
+describe(control)
+describeBy(control, SurveyRcleaned$time)
+
+#Plotting for variables
+
+#AMO
+describe(SurveyRcleaned$AScore)
+boxplot(AScore~`Year observation`,data=SurveyRcleaned, xlab="Year", ylab="A-Score")
+
+describe(SurveyRcleaned$MScore)
+boxplot(MScore~`Year observation`,data=SurveyRcleaned, xlab="Year", ylab="M-Score")
+
+describe(SurveyRcleaned$OScore)
+boxplot(OScore~`Year observation`,data=SurveyRcleaned, xlab="Year", ylab="O-Score")
+
+#employee turnover
+describe(SurveyRcleaned$WRR)
+
+#startup performance
+boxplot(RevGrowth~`Year observation`,data=SurveyRcleaned, xlab="Year", ylab="Revenue growth (%)")
+boxplot(Rev~`Year observation`,data=SurveyRcleaned, xlab="Year", ylab="Revenue (CHF)")
+boxplot(PLA~`Year observation`,data=SurveyRcleaned, xlab="Year", ylab="Loss or Profit (0/1)")
+
+
+#Data transformation
+
+#cancel one outlier for Rev and RevGrowth
+SurveyRcleaned <- SurveyRcleaned %>% replace_with_na(replace = list(Rev = 12000000))
+SurveyRcleaned <- SurveyRcleaned %>% replace_with_na(replace = list(RevGrowth = 10))
+
+#tranfrom values to reduce skewness
+SurveyRcleaned$WRR_trans <- log((SurveyRcleaned$WRR+1))
+SurveyRcleaned$WRR_Adj_trans <- log((SurveyRcleaned$WRR_Adj+1))
+SurveyRcleaned$WRR_excl_trans <-  log((SurveyRcleaned$WRR_excl+1))
+SurveyRcleaned$TurnOutTotal_trans <- log((SurveyRcleaned$TurnOutTotal+1))
+SurveyRcleaned$TurnOutTotal_adj_trans <- log((SurveyRcleaned$TurnOutTotal_adj+1))
+SurveyRcleaned$TurnOutTotal_excl_trans <- log((SurveyRcleaned$TurnOutTotal_excl+1))
+SurveyRcleaned$TurnInTotal_trans <- log((SurveyRcleaned$TurnInTotal+1))
+
+SurveyRcleaned$Rev_trans <- log(SurveyRcleaned$Rev)
+SurveyRcleaned$RevGrowth_trans <- sign(SurveyRcleaned$RevGrowth)*log((abs(SurveyRcleaned$RevGrowth)+1))
+
+#Make correlation matrix
+TestCor1 <- SurveyRcleaned [, c("WRR_trans", "AScore", "MScore", "OScore", "age", "Turn", "HighQual", "RDA", "Funding", "PrevDirectorExp", "AMOExp", "HRPosition", "Industry", "Founding")]
+hetcor(TestCor1)
+TestCor2 <- SurveyRcleaned [, c("TurnOutTotal", "AScore", "MScore", "OScore", "age", "Turn", "HighQual", "RDA", "Funding", "PrevDirectorExp", "AMOExp", "HRPosition", "Industry", "Founding")]
+hetcor(TestCor2)
+
+#Multicolinearity check
+FixedCheck_1 <- plm(WRR_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "pooling", index = c("id", "time"))
+vif(FixedCheck_1)
+RandomCheck_1 <- plm(WRR_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+vif(RandomCheck_1)
+
+FixedCheck_2 <- plm(TurnOutTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "pooling", index = c("id", "time"))
+vif(FixedCheck_2)
+RandomCheck_2 <- plm(TurnOutTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+vif(RandomCheck_2)
+
+FixedCheck_3 <- plm(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "pooling", index = c("id", "time"))
+vif(FixedCheck_3)
+RandomCheck_3 <- plm(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + AMOExp, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+vif(RandomCheck_3)
+
+FixedCheck_4 <- plm(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "pooling", index = c("id", "time"))
+vif(FixedCheck_4)
+RandomCheck_4 <- plm(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + AMOExp, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+vif(RandomCheck_4)
+
+
+#Analysis
+
+#Fixed effects model and random effects model
+#Create subsets for positive WRR & TTR
+
+WRRpos <- subset(SurveyRcleaned, WRR >0)
+TTRpos <- subset(SurveyRcleaned, TurnOutTotal>0)
+
+# Model 1 WRR
+
+#base model (1a&B)
+FixedM1A_1 <- plm(WRR_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_1)
+RandomM1A_1 <- plm(WRR_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM1A_1)
+#compare models
+phtest(FixedM1A_1, RandomM1A_1)
+#check for heteroscedasticity
+bptest(WRR_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM1A_1, vcovHC(FixedM1A_1, type = "HC3"))
+
+#granger test
+grangertest(WRR_trans~AScore, order = 4, data = SurveyRcleaned)
+grangertest(AScore~WRR_trans, order = 4, data = SurveyRcleaned)
+
+#careful sample  (1c&d)
+FixedM1A_4 <- plm(WRR_Adj_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_4)
+#random model not possible because of not enough observations
+#check for heteroscedasticity
+bptest(WRR_Adj_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM1A_4, vcovHC(FixedM1A_4, type = "HC3"))
+
+#WRR > 0 (1e&f)
+FixedM1A_6 <- plm(WRR_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=WRRpos, model = "within", index = c("id", "time"))
+summary(FixedM1A_6)
+#random model not possible because of not enough observations
+#check for heteroscedasticity
+bptest(WRR_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=WRRpos, studentize = F)
+#no adjustments necessary 0-hypothesis cannot be rejected
+coeftest(FixedM1A_6, vcovHC(FixedM1A_6, type = "HC3"))
+
+#Excluding interns (1g&h)
+FixedM1A_13 <- plm(WRR_excl_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_12)
+RandomM1A_13 <- plm(WRR_excl_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM1A_12)
+#compare models
+phtest(FixedM1A_13, RandomM1A_13)
+#check for heteroscedasticity
+bptest(WRR_excl_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(WRR_excl_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomM1A_13, vcovHC(RandomM1A_13, type = "HC3"))
+coeftest(FixedM1A_13, vcovHC(FixedM1A_13, type = "HC3"))
+
+#Granger Test
+grangertest(WRR_excl_trans~OScore, order = 4, data = SurveyRcleaned)
+grangertest(OScore~WRR_excl_trans, order = 4, data = SurveyRcleaned)
+
+#non transformed model (1i&j)
+FixedM1A_11 <- plm(WRR~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_11)
+RandomM1A_11 <- plm(WRR~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM1A_11)
+#compare models
+phtest(FixedM1A_11, RandomM1A_11)
+#check for heteroscedasticity
+bptest(WRR~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM1A_11, vcovHC(FixedM1A_11, type = "HC3"))
+
+#Model TTR
+
+#Base model (2a&b)
+FixedM1A_2 <- plm(TurnOutTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_2)
+RandomM1A_2 <- plm(TurnOutTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM1A_2)
+#compare models
+phtest(FixedM1A_2, RandomM1A_2)
+#check for heteroscedasticity
+bptest(TurnOutTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(TurnOutTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomM1A_2, vcovHC(RandomM1A_2, type = "HC3"))
+coeftest(FixedM1A_2, vcovHC(FixedM1A_2, type = "HC3"))
+
+#Granger Test
+grangertest(TurnOutTotal_trans~MScore, order = 4, data = SurveyRcleaned)
+grangertest(MScore~TurnOutTotal_trans, order = 4, data = SurveyRcleaned)
+
+#careful sample  (2c&d)
+FixedM1A_3 <- plm(TurnOutTotal_adj_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_3)
+RandomM1A_3 <- plm(TurnOutTotal_adj_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+#random model not possible because of not enough observations
+#check for heteroscedasticity
+bptest(TurnOutTotal_adj_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM1A_3, vcovHC(FixedM1A_3, type = "HC3"))
+
+# TTR > 0  (2e&f)
+FixedM1A_5 <- plm(TurnOutTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=TTRpos, model = "within", index = c("id", "time"))
+summary(FixedM1A_5)
+#random model not possible because of not enough observations
+#check for heteroscedasticity
+bptest(TurnOutTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=TTRpos, studentize = F)
+
+#Excluding interns  (2g&h)
+FixedM1A_14 <- plm(TurnOutTotal_excl_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_14)
+RandomM1A_14 <- plm(TurnOutTotal_excl_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM1A_14)
+#compare models
+phtest(FixedM1A_14, RandomM1A_14)
+#check for heteroscedasticity
+bptest(TurnOutTotal_excl_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(TurnOutTotal_excl_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomM1A_14, vcovHC(RandomM1A_14, type = "HC3"))
+coeftest(FixedM1A_14, vcovHC(FixedM1A_14, type = "HC3"))
+
+#Granger Test
+grangertest(TurnOutTotal_excl_trans~OScore, order = 4, data = SurveyRcleaned)
+grangertest(OScore~TurnOutTotal_excl_trans, order = 4, data = SurveyRcleaned)
+
+#non transformed model  (2i&j)
+FixedM1A_12 <- plm(TurnOutTotal~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_12)
+RandomM1A_12 <- plm(TurnOutTotal~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM1A_12)
+#compare models
+phtest(FixedM1A_12, RandomM1A_12)
+#check for heteroscedasticity
+bptest(TurnOutTotal~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(TurnOutTotal~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM1A_12, vcovHC(FixedM1A_12, type = "HC3"))
+coeftest(RandomM1A_12, vcovHC(RandomM1A_12, type = "HC3"))
+
+#Model 3 turnover - performance
+
+#base model (3a&b)
+FixedM3_1 <- plm(RevGrowth_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM3_1)
+RandomM3_1 <- plm(RevGrowth_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM3_1)
+#compare models
+phtest(FixedM3_1, RandomM3_1)
+#check for heteroscedasticity
+bptest(RevGrowth_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(RevGrowth_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM3_1, vcovHC(FixedM3_1, type = "HC3"))
+
+#(3c&d)
+FixedM3_2 <- plm(RevGrowth_trans~TurnOutTotal_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM3_2)
+RandomM3_2 <- plm(RevGrowth_trans~TurnOutTotal_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM3_2)
+#compare models
+phtest(FixedM3_2, RandomM3_2)
+#check for heteroscedasticity
+bptest(RevGrowth_trans~TurnOutTotal_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(RevGrowth_trans~TurnOutTotal_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM3_2, vcovHC(FixedM3_2, type = "HC3"))
+
+#careful sample  (3e&f)
+FixedM3_3 <- plm(RevGrowth_trans~WRR_Adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM3_3)
+RandomM3_3 <- plm(RevGrowth_trans~WRR_Adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM3_3)
+#compare models
+phtest(FixedM3_3, RandomM3_3)
+#check for heteroscedasticity
+bptest(RevGrowth_trans~WRR_Adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM4_3, vcovHC(FixedM4_3, type = "HC3"))
+
+#(3g&h)
+FixedM3_4 <- plm(RevGrowth_trans~TurnOutTotal_adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM3_4)
+RandomM3_4 <- plm(RevGrowth_trans~TurnOutTotal_adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM3_4)
+#compare models
+phtest(FixedM3_4, RandomM3_4)
+#check for heteroscedasticity
+bptest(RevGrowth_trans~TurnOutTotal_adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomM3_4, vcovHC(RandomM3_4, type = "HC3"))
+
+#Excluding interns  (3i&j)
+FixedM3_5 <- plm(RevGrowth_trans~WRR_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM3_5)
+RandomM3_5 <- plm(RevGrowth_trans~WRR_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM3_5)
+#compare models
+phtest(FixedM3_5, RandomM3_5)
+#check for heteroscedasticity
+bptest(RevGrowth_trans~WRR_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(RevGrowth_trans~WRR_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM3_5, vcovHC(FixedM3_5, type = "HC3"))
+
+#(3k&l)
+FixedM3_6 <- plm(RevGrowth_trans~TurnOutTotal_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM3_6)
+RandomM3_6 <- plm(RevGrowth_trans~TurnOutTotal_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM3_6)
+#compare models
+phtest(FixedM3_6, RandomM3_6)
+#check for heteroscedasticity
+bptest(RevGrowth_trans~TurnOutTotal_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(RevGrowth_trans~TurnOutTotal_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM3_6, vcovHC(FixedM3_6, type = "HC3"))
+
+#non transformed model (3m&n)
+FixedM3_7 <- plm(RevGrowth_trans~WRR + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM3_7)
+RandomM3_7 <- plm(RevGrowth_trans~WRR + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM3_7)
+#compare models
+phtest(FixedM3_7, RandomM3_7)
+#check for heteroscedasticity
+bptest(RevGrowth_trans~WRR + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(RevGrowth_trans~WRR + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM3_7, vcovHC(FixedM3_7, type = "HC3"))
+
+#(3o&p)
+FixedM3_8 <- plm(RevGrowth_trans~TurnOutTotal + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM3_8)
+RandomM3_8 <- plm(RevGrowth_trans~TurnOutTotal + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM3_8)
+#compare models
+phtest(FixedM3_8, RandomM3_8)
+#check for heteroscedasticity
+bptest(RevGrowth_trans~TurnOutTotal + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(RevGrowth_trans~TurnOutTotal + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM3_8, vcovHC(FixedM3_8, type = "HC3"))
+
+#Model 4 turnover - performance
+
+#base model (4a&b)
+FixedM4_1 <- plm(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM4_1)
+RandomM4_1 <- plm(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM4_1)
+#compare models
+phtest(FixedM4_1, RandomM4_1)
+#check for heteroscedasticity
+bptest(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomM4_1, vcovHC(RandomM4_1, type = "HC3"))
+
+#(4c&d)
+FixedM4_2 <- plm(Rev_trans~TurnOutTotal_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM4_2)
+RandomM4_2 <- plm(Rev_trans~TurnOutTotal_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM4_2)
+#compare models
+phtest(FixedM4_2, RandomM4_2)
+#check for heteroscedasticity
+bptest(Rev_trans~TurnOutTotal_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(Rev_trans~TurnOutTotal_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM4_2, vcovHC(FixedM4_2, type = "HC3"))
+
+#careful sample  (4e&f)
+FixedM4_3 <- plm(Rev_trans~WRR_Adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM4_3)
+RandomM4_3 <- plm(Rev_trans~WRR_Adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM4_3)
+#compare models
+phtest(FixedM4_3, RandomM4_3)
+#check for heteroscedasticity
+bptest(Rev_trans~WRR_Adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM4_3, vcovHC(FixedM4_3, type = "HC3"))
+
+#(4g&h)
+FixedM4_4 <- plm(Rev_trans~TurnOutTotal_adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM4_4)
+RandomM4_4 <- plm(Rev_trans~TurnOutTotal_adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM4_4)
+#compare models
+phtest(FixedM4_4, RandomM4_4)
+#check for heteroscedasticity
+bptest(Rev_trans~TurnOutTotal_adj_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM4_3, vcovHC(FixedM4_3, type = "HC3"))
+
+grangertest(Rev_trans~TurnOutTotal_adj_trans, order = 4, data = SurveyRcleaned)
+grangertest(TurnOutTotal_adj_trans~Rev_trans, order = 4, data = SurveyRcleaned)
+
+#Excluding interns  (4i&j)
+FixedM4_5 <- plm(Rev_trans~WRR_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM4_5)
+RandomM4_5 <- plm(Rev_trans~WRR_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM4_5)
+#compare models
+phtest(FixedM4_5, RandomM4_5)
+#check for heteroscedasticity
+bptest(Rev_trans~WRR_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(Rev_trans~WRR_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomM4_5, vcovHC(RandomM4_5, type = "HC3"))
+
+#(4k&l)
+FixedM4_6 <- plm(Rev_trans~TurnOutTotal_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM4_6)
+RandomM4_6 <- plm(Rev_trans~TurnOutTotal_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM4_6)
+#compare models
+phtest(FixedM4_6, RandomM4_6)
+#check for heteroscedasticity
+bptest(Rev_trans~TurnOutTotal_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(Rev_trans~TurnOutTotal_excl_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomM4_6, vcovHC(RandomM4_6, type = "HC3"))
+
+#non transformed model  (4m&n)
+FixedM4_7 <- plm(Rev_trans~WRR + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM4_7)
+RandomM4_7 <- plm(Rev_trans~WRR + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM4_7)
+#compare models
+phtest(FixedM4_7, RandomM4_7)
+#check for heteroscedasticity
+bptest(Rev_trans~WRR + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(Rev_trans~WRR + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomM4_7, vcovHC(RandomM4_7, type = "HC3"))
+
+#(4o&p)
+FixedM4_8 <- plm(Rev_trans~TurnOutTotal + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM4_8)
+RandomM4_8 <- plm(Rev_trans~TurnOutTotal + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM4_8)
+#compare models
+phtest(FixedM4_8, RandomM4_8)
+#check for heteroscedasticity
+bptest(Rev_trans~TurnOutTotal + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+bptest(Rev_trans~TurnOutTotal + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(FixedM4_8, vcovHC(FixedM4_8, type = "HC3"))
+
+#WWR >0 (4q&r)
+FixedM4_9 <- plm(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=WRRpos, model = "within", index = c("id", "time"))
+summary(FixedM4_9)
+RandomM4_9 <- plm(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + Founding, data=WRRpos, model = "random", index = c("id", "time"))
+summary(RandomM4_9)
+#no Random model because n too small
+#check for heteroscedasticity
+bptest(Rev_trans~WRR_trans + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + factor(id) + factor(time), data=WRRpos, studentize = F)
+#make adjustments
+coeftest(RandomM4_1, vcovHC(RandomM3_1, type = "HC3"))
+coeftest(FixedM4_1, vcovHC(FixedM3_1, type = "HC3"))
+
+#granger causality test
+grangertest(Rev_trans~TurnOutTotal_adj_trans, order=4, data=SurveyRcleaned)
+grangertest(TurnOutTotal_adj_trans~Rev_trans, order=4, data=SurveyRcleaned)
+
+
+#other models
+
+#additional granger tests
+grangertest(TurnOutTotal_trans~HRPosition, order=4, data=SurveyRcleaned)
+grangertest(HRPosition~TurnOutTotal_trans, order=4, data=SurveyRcleaned)
+
+grangertest(WRR_trans~HRPosition, order=4, data=SurveyRcleaned)
+grangertest(HRPosition~WRR_trans, order=4, data=SurveyRcleaned)
+
+#impact on incoming workers
+FixedMO_1 <- plm(TurnInTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition, data=SurveyRcleaned, model = "within", index = c("id", "time"))
+summary(FixedM1A_1)
+RandomMO_1 <- plm(TurnInTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + AMOExp + HRPosition + Industry, data=SurveyRcleaned, model = "random", index = c("id", "time"))
+summary(RandomM1A_1)
+#compare models
+phtest(FixedMO_1, RandomMO_1)
+#check for heteroscedasticity
+bptest(TurnInTotal_trans~AScore + MScore + OScore + age + Turn + HighQual + RDA + Funding + PrevDirectorExp + HRPosition + Industry + AMOExp + factor(id) + factor(time), data=SurveyRcleaned, studentize = F)
+#make adjustments
+coeftest(RandomMO_1, vcovHC(RandomMO_1, type = "HC3"))
